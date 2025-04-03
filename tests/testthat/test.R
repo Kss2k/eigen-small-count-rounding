@@ -1,5 +1,7 @@
 library(tidyr)
 library(dplyr)
+library(SmallCountRounding)
+
 devtools::load_all()
 
 test_dat <- data.frame(
@@ -15,26 +17,12 @@ test_dat <- data.frame(
   values_to = "n"
 )
 
-pls_rounding(test_dat, dim_var=c("col", "row"),
+a <- pls_rounding(test_dat, dim_var=c("col", "row"),
              freq_var="n", total=TRUE, exclude_no_total=TRUE, 
              round_base = 5)
 
-X <- matrix(c(0, 1, 0, 1, 0, 0, 0,
-              0, 0, 1, 1, 0, 0, 0,
-              0, 0, 1, 0, 1, 0, 0,
-              1, 0, 0, 0, 0, 1, 0,
-              0, 1, 0, 0, 0, 1, 0,
-              0, 0, 1, 0, 0, 0, 1), 
-            nrow=6, ncol=7, byrow=TRUE)
-
-y <- c(2, 1, 1, 3, 1, 2)
-
-y0 <- rep(0, 6)
-z1 <- t(X) %*% y
-c1 <- X %*% z1
-k <- 2
-y0[k] <- 5
-z2 <- t(X) %*% (y - y0)
-c2 <- X %*% z2
-k <- 4
-y0[k] <- 5
+b <- PLSrounding(test_dat, 
+            # dimVar=c("col", "row"),
+            formula = ~ col + row,
+            freqVar="n", 
+            roundBase = 5)$publish

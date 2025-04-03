@@ -25,19 +25,20 @@ get_unique_and_total <- function(x) {
 }
 
 
-reduce_X_y <- function(X, y, b) {
-  z <- t(X) %*% y
+reduce_X_y <- function(X, y_i, b, z) {
+  z_i <- t(X) %*% y_i
 
-  if (!any(z < b)) 
+  if (!any(z_i < b)) 
     return(list(X=NULL, y=NULL))
 
-  inner <- apply(X[, z < b, drop=FALSE], MARGIN=1, FUN=\(x) any(x > 0))
+  inner <- apply(X[, z_i < b, drop=FALSE], MARGIN=1, FUN=\(x) any(x > 0))
   var0  <- apply(X[inner, , drop=FALSE], MARGIN=2, FUN=\(x) all(x == x[1]))
 
-  X <- X[inner, !var0]
-  y <- y[inner]
+  X_i <- X[inner, !var0]
+  y_i <- y_i[inner]
+  z_e <- (z - z_i)[!var0]
 
-  list(X=X, y=y, mask_y = inner, mask_X = !var0)
+  list(X_i=X_i, y_i=y_i, mask_y = inner, mask_X = !var0, z_e=z_e)
 }
 
 
@@ -90,7 +91,7 @@ pls_rounding <- function(data, dim_var, freq_var, round_base=3, total=TRUE,
   X <- create_dummy(data, groupings)
   M <- b * (X %*% t(X))
   y <- data[[freq_var]]
-  z <- t(X) %*% y
+  z <- as.vector(t(X) %*% y)
   y0 <- rep(0, length(y))
 
   c1 <- X %*% z
@@ -99,19 +100,19 @@ pls_rounding <- function(data, dim_var, freq_var, round_base=3, total=TRUE,
   X_i <- X
   y_i <- y
 
-  last_mask <- rep(TRUE, length(y))
-
   while (TRUE) {
-    reduced <- reduce_X_y(X=X, y=y_i, b=b)
+    reduced <- reduce_X_y(X=X, y_i=y_rounded, b=b, z=z)
 
-    if (is.null(reduced$X))
+    if (is.null(reduced$X_i))
       break
 
-    y_rounded_sub <- round_cells(X=reduced$X, y=reduced$y, b=b)
-    y_rounded[reduced$mask_y] <- y_rounded_sub
-    last_mask[reduced$mask_y] <- FALSE
-
-    y_i <- y_rounded
+    s_y <- sum(reduced$y_i)
+    s_e <- sum(y - y_rounded)
+    n_b <- round((s_y + s_e) / b)
+    y_i <- round_cells(X=reduced$X_i, y=reduced$y_i, b=b, 
+                       z_e=reduced$z_e, n_b=n_b)
+   
+    y_rounded[reduced$mask_y] <- y_i
   }
 
 
@@ -128,12 +129,13 @@ pls_rounding <- function(data, dim_var, freq_var, round_base=3, total=TRUE,
 }
 
 
-round_cells <- function(X, y, z=NULL,y0=NULL, b, M=NULL, max.iter=1000, 
-                        seed = 1234) {
+round_cells <- function(X, y, z=NULL,y0=NULL, b, n_b, 
+                        M=NULL, max.iter=1000, 
+                        z_e, seed = 1234) {
   set.seed(seed)
 
   if (is.null(z))
-    z <- as.vector(t(X) %*% y)
+    z <- as.vector(t(X) %*% y) + z_e
   if (is.null(y0))
     y_i <- rep(0, length(y))
   if (is.null(M))
@@ -141,9 +143,7 @@ round_cells <- function(X, y, z=NULL,y0=NULL, b, M=NULL, max.iter=1000,
 
   c_i <- X %*% z
 
-  nb <- round(sum(y) / b)
-
-  for (i in seq_len(nb)) {
+  for (i in seq_len(n_b)) {
     printf("\rIteration %d", i)
 
     m <- max(c_i[y_i == 0])
@@ -175,9 +175,9 @@ round_cells <- function(X, y, z=NULL,y0=NULL, b, M=NULL, max.iter=1000,
     k_max_i <- which(c_i == k_max & y_i == 0)
     if (length(k_max_i) > 1) k_max_i <- sample(k_max_i, 1)
 
-    if (k_min >= k_max || (k_max == last_k_max))
+    if (k_min >= k_max)
       break
-    else if (k_max < last_k_max) {
+    else if (k_max <= last_k_max) {
       y_i <- last_y_i
       break
     }
@@ -190,7 +190,7 @@ round_cells <- function(X, y, z=NULL,y0=NULL, b, M=NULL, max.iter=1000,
 
     x <- as.vector(t(X) %*% y)
     x_hat <- as.vector(t(X) %*% y_i)
-    printf("kmax = %d, kmin = %d, cov = %f", k_max, k_min, cov(x_hat, x))
+    printf("kmax = %d, kmin = %d, cov = %f, cor = %f", k_max, k_min, cov(x_hat, x), cor(x_hat, x))
 
     last_k_max <- k_max
     last_y_i <- y_i
