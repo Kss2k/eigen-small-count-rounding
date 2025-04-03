@@ -5,6 +5,10 @@ init_sparse_matrix <- function(nrow, ncol) {
     .Call('_EigenSmallCountRounding_init_sparse_matrix', PACKAGE = 'EigenSmallCountRounding', nrow, ncol)
 }
 
+non_zeros_sparse_matrix <- function(mat_xptr) {
+    .Call('_EigenSmallCountRounding_non_zeros_sparse_matrix', PACKAGE = 'EigenSmallCountRounding', mat_xptr)
+}
+
 print_sparse_matrix <- function(M) {
     invisible(.Call('_EigenSmallCountRounding_print_sparse_matrix', PACKAGE = 'EigenSmallCountRounding', M))
 }

@@ -7,18 +7,21 @@ typedef Eigen::SparseMatrix<double> SparseMatrix; // maybe use int?
 typedef Rcpp::XPtr<Eigen::SparseMatrix<double>> RSparseMatrix;
 
 // [[Rcpp::export]]
-Rcpp::XPtr<Eigen::SparseMatrix<double>> init_sparse_matrix(const int nrow, const int ncol) {
+SEXP init_sparse_matrix(const int nrow, const int ncol) {
   SparseMatrix *M = new SparseMatrix(nrow, ncol);
 
-  RSparseMatrix out = Rcpp::XPtr<SparseMatrix>(M);
+  RSparseMatrix out = Rcpp::XPtr<SparseMatrix>(M, true);
 
   return out;
 }
 
 
 // [[Rcpp::export]]
-void free_sparse_matrix(RSparseMatrix *M) {
-  delete M;
+int non_zeros_sparse_matrix(SEXP mat_xptr) {
+  Rcpp::XPtr<Eigen::SparseMatrix<double>> xptr(mat_xptr);
+  Eigen::SparseMatrix<double> M = *xptr;
+
+  return M.nonZeros();
 }
 
 
