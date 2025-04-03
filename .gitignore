@@ -3,3 +3,5 @@
 .rdata
 .Rhistory
 *.Rproj*
+*.so
+*.o
