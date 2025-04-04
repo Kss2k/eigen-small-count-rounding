@@ -23,6 +23,18 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// create_dummy_cpp
+SEXP create_dummy_cpp(const Rcpp::CharacterMatrix groupings_inner, const Rcpp::CharacterMatrix groupings_publish);
+RcppExport SEXP _EigenSmallCountRounding_create_dummy_cpp(SEXP groupings_innerSEXP, SEXP groupings_publishSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const Rcpp::CharacterMatrix >::type groupings_inner(groupings_innerSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::CharacterMatrix >::type groupings_publish(groupings_publishSEXP);
+    rcpp_result_gen = Rcpp::wrap(create_dummy_cpp(groupings_inner, groupings_publish));
+    return rcpp_result_gen;
+END_RCPP
+}
 // non_zeros_sparse_matrix
 int non_zeros_sparse_matrix(SEXP mat_xptr);
 RcppExport SEXP _EigenSmallCountRounding_non_zeros_sparse_matrix(SEXP mat_xptrSEXP) {
@@ -47,6 +59,7 @@ END_RCPP
 
 static const R_CallMethodDef CallEntries[] = {
     {"_EigenSmallCountRounding_init_sparse_matrix", (DL_FUNC) &_EigenSmallCountRounding_init_sparse_matrix, 2},
+    {"_EigenSmallCountRounding_create_dummy_cpp", (DL_FUNC) &_EigenSmallCountRounding_create_dummy_cpp, 2},
     {"_EigenSmallCountRounding_non_zeros_sparse_matrix", (DL_FUNC) &_EigenSmallCountRounding_non_zeros_sparse_matrix, 1},
     {"_EigenSmallCountRounding_print_sparse_matrix", (DL_FUNC) &_EigenSmallCountRounding_print_sparse_matrix, 1},
     {NULL, NULL, 0}

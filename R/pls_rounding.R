@@ -20,6 +20,19 @@ create_dummy <- function(data, groupings) {
 }
 
 
+create_dummy_new <- function(data, groupings) {
+
+  dim_var <- colnames(groupings)
+  groupings_inner <- as.matrix(data[dim_var])
+  groupings_publish <- as.matrix(groupings)
+
+  create_dummy_cpp(
+    groupings_inner=groupings_inner,
+    groupings_publish=groupings_publish
+  )
+}
+
+
 get_unique_and_total <- function(x) {
   c(as.character(unique(x)), "__total__")
 }
@@ -38,7 +51,7 @@ reduce_X_y <- function(X, y_i, b, z) {
   y_i <- y_i[inner]
   z_e <- (z - z_i)[!var0]
 
-  list(X_i=X_i, y_i=y_i, mask_y = inner, mask_X = !var0, z_e=z_e)
+  list(X_i=X_i, y_i=y_i, mask_y=inner, mask_X= !var0, z_e=z_e)
 }
 
 
