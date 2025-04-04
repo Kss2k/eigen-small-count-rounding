@@ -29,11 +29,19 @@ calc_c <- function(mat_xptr, z_i) {
     .Call('_EigenSmallCountRounding_calc_c', PACKAGE = 'EigenSmallCountRounding', mat_xptr, z_i)
 }
 
-reduce_X_y_cpp <- function(Xptr, y_i, b, z) {
-    .Call('_EigenSmallCountRounding_reduce_X_y_cpp', PACKAGE = 'EigenSmallCountRounding', Xptr, y_i, b, z)
+as_numeric_vector <- function(vec_xptr) {
+    .Call('_EigenSmallCountRounding_as_numeric_vector', PACKAGE = 'EigenSmallCountRounding', vec_xptr)
 }
 
-round_cells_cpp <- function(Xptr, y, b, n_b, max_iter, z_e, seed, z_ = NULL, y0_ = NULL, M_ = NULL) {
-    .Call('_EigenSmallCountRounding_round_cells_cpp', PACKAGE = 'EigenSmallCountRounding', Xptr, y, b, n_b, max_iter, z_e, seed, z_, y0_, M_)
+as_xptr_vector <- function(vec) {
+    .Call('_EigenSmallCountRounding_as_xptr_vector', PACKAGE = 'EigenSmallCountRounding', vec)
+}
+
+reduce_X_y_cpp <- function(Xptr, y_i_ptr, b, z_ptr) {
+    .Call('_EigenSmallCountRounding_reduce_X_y_cpp', PACKAGE = 'EigenSmallCountRounding', Xptr, y_i_ptr, b, z_ptr)
+}
+
+round_cells_cpp <- function(Xptr, y_ptr, b, n_b, max_iter, z_e_ptr, seed) {
+    .Call('_EigenSmallCountRounding_round_cells_cpp', PACKAGE = 'EigenSmallCountRounding', Xptr, y_ptr, b, n_b, max_iter, z_e_ptr, seed)
 }
 

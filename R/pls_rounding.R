@@ -121,13 +121,15 @@ pls_rounding <- function(data, dim_var, freq_var, round_base=3, total=TRUE,
   while (TRUE) {
     printf(" > iteration %s", (i <- i + 1))
     printf(" > reducing X")
-    reduced <- reduce_X_y_cpp(X=X, y_i=y_rounded, b=b, z=z)
+
+    reduced <- reduce_X_y_cpp(X=X, y_i=as_xptr_vector(y_rounded), b=b, 
+                              z=as_xptr_vector(z))
 
     print(" > reduced X")
     if (is.null(reduced$X_i))
       break
 
-    s_y <- sum(reduced$y_i)
+    s_y <- sum(as_numeric_vector(reduced$y_i))
     s_e <- sum(y - y_rounded)
     n_b <- round((s_y + s_e) / b)
 
@@ -138,7 +140,7 @@ pls_rounding <- function(data, dim_var, freq_var, round_base=3, total=TRUE,
     y_i <- round_cells_cpp(X=reduced$X_i, y=reduced$y_i, b=b, z_e=reduced$z_e, n_b=n_b, 
                            max_iter=max_iter, seed=seed)
    
-    y_rounded[reduced$mask_y] <- y_i
+    y_rounded[reduced$mask_y] <- as_numeric_vector(y_i)
   }
 
 

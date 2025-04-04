@@ -24,23 +24,27 @@ indices <- 1:100
 n <- 10000
 col <- paste0("col", sample(indices, n, replace = TRUE))
 row <- paste0("row", sample(indices, n, replace = TRUE))
+shelf <- paste0("shelf", sample(indices, n, replace = TRUE))
+stairs <- paste0("stairs", sample(indices, n, replace = TRUE))
 n <- sample(0:10, n, replace = TRUE)
 test_dat <- data.frame(
   row = row,
   col = col,
+  shelf = shelf,
+  stairs = stairs,
   n = n
 ) 
 
-a <- pls_rounding(test_dat, dim_var=c("col", "row"),
+a <- pls_rounding(test_dat, dim_var=c("col", "row", "shelf"),
              freq_var="n", total=TRUE, exclude_no_total=FALSE,  
              round_base = 5)
 a2 <- lapply(a, FUN=\(x) {x[x=="__total__"] <- "Total"; x}) |>
   as.data.frame()
 b <- PLSrounding(test_dat, 
             # dimVar=c("col", "row"),
-            formula = ~ col * row,
+            formula = ~ col * row * shelf * stairs,
             freqVar="n", 
             roundBase = 5)$publish
-c <- left_join(x=a2, y=b, by=c("col", "row"))
+c <- left_join(x=a2, y=b, by=c("col", "row", "shelf"))
 cor(a$original, a$rounded)
 cor(b$original, b$rounded)

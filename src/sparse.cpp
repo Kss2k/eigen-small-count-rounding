@@ -3,6 +3,9 @@
 #include <unordered_map>
 #include <string>
 #include <random>
+#include <vector>
+#include <cmath>
+
 
 // [[Rcpp::depends(RcppEigen)]]
 
@@ -227,73 +230,78 @@ Rcpp::NumericVector as_numeric_vector(SEXP vec_xptr) {
   return Rcpp::NumericVector(vec.data(), vec.data() + vec.size());
 }
 
+
+// [[Rcpp::export]]
+SEXP as_xptr_vector(const Rcpp::NumericVector &vec) {
+  Eigen::VectorXd *v = new Eigen::VectorXd(vec.size());
+  for (int i = 0; i < vec.size(); i++) {
+    (*v)(i) = vec[i];
+  }
+  return Rcpp::XPtr<Eigen::VectorXd>(v, true);
+}
+
+
 /**
- * reduce_X_y_cpp:
- *   - Xptr: external pointer to an n x m sparse matrix (X).
- *   - y_i : length-n numeric vector.
- *   - b   : numeric threshold.
- *   - z   : length-m numeric vector.
+ * reduce_X_y_cpp (Faster Version)
  *
- * Returns a List with:
- *   - X_i   : new XPtr<SparseMatrix<double>> for reduced matrix
- *   - y_i   : reduced y_i
- *   - mask_y: logical row mask (the "inner" from R)
- *   - mask_X: logical column mask (the NOT of var0 from R)
- *   - z_e   : (z - z_i) subsetted by mask_X
+ *  - Xptr      : External pointer to n x m SparseMatrix<double>
+ *  - y_i_ptr   : External pointer to length-n VectorXd
+ *  - b         : double threshold
+ *  - z_ptr     : External pointer to length-m VectorXd
+ *
+ * Returns an R list with:
+ *   - X_i   : XPtr<SparseMatrix<double>> (the reduced X)
+ *   - y_i   : XPtr<VectorXd>            (the reduced y)
+ *   - mask_y: R logical vector (length n)
+ *   - mask_X: R logical vector (length m)
+ *   - z_e   : XPtr<VectorXd>            (the subset of (z - z_i))
  */
 // [[Rcpp::export]]
 Rcpp::List reduce_X_y_cpp(SEXP Xptr,
-                          SEXP y_i,
+                          SEXP y_i_ptr,
                           double b,
-                          SEXP &z)
+                          SEXP z_ptr)
 {
-  // 1) Convert Xptr -> X (a sparse matrix)
-  Rcpp::XPtr<SparseMatrixD> X(Xptr);  
-  const int n = X->rows(); // # of rows in X
-  const int m = X->cols(); // # of cols in X
+  // 1) Convert Xptr -> X
+  Rcpp::XPtr<SparseMatrixD> X(Xptr);
+  const int n = X->rows();
+  const int m = X->cols();
 
-  // Safety checks (not strictly required but good practice):
-  if (y_i.size() != n) {
+  // 2) Convert y_i_ptr -> an Eigen vector
+  Rcpp::XPtr<Eigen::VectorXd> Yptr(y_i_ptr);
+  if (Yptr->size() != n) {
     Rcpp::stop("Size of y_i must match # of rows in X.");
   }
-  if (z.size() != m) {
+
+  // 3) Convert z_ptr -> an Eigen vector
+  Rcpp::XPtr<Eigen::VectorXd> Zptr(z_ptr);
+  if (Zptr->size() != m) {
     Rcpp::stop("Size of z must match # of cols in X.");
   }
 
-  // 2) Compute z_i = t(X) * y_i
-  //    X is n x m, so X^T is m x n. y_i is length n => result is length m
-  // Map y_i to an Eigen vector
-  // Eigen::Map<const Eigen::VectorXd> Y(y_i.begin(), n);
-  Rcpp::XPtr<Eigen::VectorXd> y_i_ptr(y_i);
-  Eigen::Vector Y = *y_i_ptr;
+  // 4) Compute z_i = t(X) * y_i  (length = m)
+  Eigen::VectorXd z_i = X->transpose() * (*Yptr);
 
-  // z_i will have length m
-  Eigen::VectorXd z_i = X->transpose() * Y;  // (m x n) * (n x 1) = (m x 1)
-
-  // 3) If !any(z_i < b), return list(X=NULL, y=NULL)
+  // 5) If !any(z_i < b), return (X=NULL, y=NULL)
   bool anyBelowB = false;
-  for (int col = 0; col < m; ++col) {
-    if (z_i[col] < b) {
+  for (int c = 0; c < m; ++c) {
+    if (z_i[c] < b) {
       anyBelowB = true;
       break;
     }
   }
   if (!anyBelowB) {
-    // No column has z_i < b
     return Rcpp::List::create(
       Rcpp::Named("X_i") = R_NilValue,
       Rcpp::Named("y_i") = R_NilValue
-      // If you want to return masks or z_e as NULL also, do so here
     );
   }
 
-  // --------------------------------------------------------------------------
-  // inner <- apply(X[, z_i < b], MARGIN=1, any(x>0))
-  // 
-  // We'll define colMaskB[c] = (z_i[c] < b).
-  // Then rowMask[r] = true if row r has any positive entry in any col c
-  // for which colMaskB[c] is true.
-  // --------------------------------------------------------------------------
+  // -------------------------------------------------------------
+  // Build colMaskB[c] = (z_i[c] < b).
+  // Then rowMask[r] = true if row r has any positive entry
+  // in columns c where colMaskB[c] = true.
+  // -------------------------------------------------------------
   std::vector<bool> colMaskB(m, false);
   for (int c = 0; c < m; ++c) {
     colMaskB[c] = (z_i[c] < b);
@@ -301,8 +309,6 @@ Rcpp::List reduce_X_y_cpp(SEXP Xptr,
 
   std::vector<bool> rowMask(n, false);
 
-  // For each column c where colMaskB[c] is true, iterate over its non-zeros.
-  // If a non-zero value > 0, mark rowMask[r] = true.
   for (int c = 0; c < m; ++c) {
     if (!colMaskB[c]) continue;
     for (SparseMatrixD::InnerIterator it(*X, c); it; ++it) {
@@ -312,176 +318,182 @@ Rcpp::List reduce_X_y_cpp(SEXP Xptr,
     }
   }
 
-  // --------------------------------------------------------------------------
-  // var0 <- apply(X[inner, ], MARGIN=2, all(x == x[1]))
-  //
-  // For each column c, among the rows r where rowMask[r] is true ("inner"),
-  // check if all the values are the same.
-  // 
-  // Because X is sparse, we have to remember: 
-  //   - if a row r is not in the inner-iterator for column c, that value is 0.
-  // --------------------------------------------------------------------------
+  // -------------------------------------------------------------
+  // var0[c] = "all the same" among the rows where rowMask[r] is true.
+  // We'll do a single pass over the column's nonzeros to discover
+  // up to two distinct values (0 vs. nonzero).
+  // -------------------------------------------------------------
   std::vector<bool> var0(m, false);
 
-  for (int c = 0; c < m; ++c) {
-    // We'll collect the values for all "inner" rows in this column.
-    // If the row is not stored, that means the value is 0.
-    // Then check if they are all the same.
-    // 
-    // If there are 0 or 1 'inner' rows, we consider that "all the same" => var0[c] = true.
-    // (Because there's no variation with 0/1 points.)
-
-    // Make a small map: row -> value
-    // (We expect a column to have few nonzeros, so this is more efficient
-    //  than scanning all rows.)
-    std::unordered_map<int, double> colValues;
-    for (SparseMatrixD::InnerIterator it(*X, c); it; ++it) {
-      colValues[it.row()] = it.value();
-    }
-
-    // Now iterate over all rows to find those where rowMask[r] = true
-    double firstVal = 0.0;
-    bool foundFirst = false;
-    bool allSame = true;
-    int countIncluded = 0;
-
-    for (int r = 0; r < n; ++r) {
-      if (!rowMask[r]) continue; // skip rows that are not "inner"
+  // Precompute how many rows are "inner" => included
+  int countIncluded = 0;
+  for (int r = 0; r < n; ++r) {
+    if (rowMask[r]) {
       countIncluded++;
-
-      // value in X(r,c)
-      double val = 0.0;
-      auto search = colValues.find(r);
-      if (search != colValues.end()) {
-        val = search->second;
-      }
-
-      if (!foundFirst) {
-        firstVal = val;
-        foundFirst = true;
-      } else {
-        // Compare to firstVal
-        if (val != firstVal) {
-          allSame = false;
-          break;
-        }
-      }
-    }
-
-    // If we have 0 or 1 included rows, or if we didn't break:
-    //   => allSame remains true
-    // => var0[c] = allSame
-    // The R code sets var0=TRUE if "all x == x[1]"
-    // so that means "no variation" => "allSame = true"
-    if (countIncluded <= 1) {
-      var0[c] = true;
-    } else {
-      var0[c] = allSame;
     }
   }
 
-  // mask_X = !var0
-  // We'll build that as well for clarity:
-  std::vector<bool> colMask(m, true);
+  for (int c = 0; c < m; ++c) {
+    // If 0 or 1 row is included, there's no variation
+    if (countIncluded <= 1) {
+      var0[c] = true;
+      continue;
+    }
+
+    // We'll gather up to 2 distinct values among included rows
+    // (0 is implicitly used for rows not in the column's nonzeros)
+    std::vector<double> distinctVals;
+    distinctVals.reserve(2);
+
+    // Count how many included rows appear as nonzero
+    int foundCount = 0;
+
+    for (SparseMatrixD::InnerIterator it(*X, c); it; ++it) {
+      int r = it.row();
+      if (!rowMask[r]) continue;  // skip rows not in "inner"
+      double val = it.value();
+      foundCount++;
+
+      // Insert into distinctVals (up to 2):
+      if (distinctVals.empty()) {
+        distinctVals.push_back(val);
+      } else if (distinctVals.size() == 1) {
+        if (std::fabs(val - distinctVals[0]) > 1e-15) {
+          // It's genuinely different
+          distinctVals.push_back(val);
+          // Now we have 2 distinct values => can break
+          break;
+        }
+      } else {
+        // distinctVals.size() == 2 => definitely variation
+        break;
+      }
+    }
+
+    // If we ended the loop with >2 distinct => variation
+    // But we only allowed up to 2 in distinctVals, so check after
+    if (distinctVals.size() > 1) {
+      var0[c] = false;
+      continue;
+    }
+
+    // Now see how many included rows we *didn't* see as nonzero
+    int missing = countIncluded - foundCount;
+    if (missing > 0) {
+      // That means those rows have value 0
+      if (distinctVals.empty()) {
+        // Everything is 0
+        // => all the same
+        var0[c] = true;
+      } else {
+        // We have exactly 1 distinct value so far
+        double stored = distinctVals[0];
+        // If that value != 0 => we have 2 distinct => variation
+        if (std::fabs(stored) > 1e-15) {
+          var0[c] = false;
+        } else {
+          // stored == 0 => all 0 => still uniform
+          var0[c] = true;
+        }
+      }
+    } else {
+      // missing=0 => all included rows were in the nonzeros
+      // => we found exactly 0 or 1 distinct value
+      //  - if 0 distinct => impossible, but let's handle gracefully
+      //  - if 1 distinct => var0[c] = true
+      if (distinctVals.empty()) {
+        // means no included row was found => but missing=0 => contradictory
+        // let's treat that as uniform => true
+        var0[c] = true;
+      } else {
+        // exactly 1 distinct => uniform
+        var0[c] = true;
+      }
+    }
+  }
+
+  // colMask[c] = !var0[c]
+  std::vector<bool> colMask(m, false);
   for (int c = 0; c < m; ++c) {
     colMask[c] = !var0[c];
   }
 
-  // --------------------------------------------------------------------------
-  // Build the reduced matrix X_i = X[ rowMask, colMask ]
-  // i.e. keep only rows where rowMask[r] is true and columns where colMask[c] is true.
-  //
-  // We'll do this by scanning all non-zero entries of X and collecting
-  // triplets that match rowMask[r] & colMask[c].
-  // --------------------------------------------------------------------------
-  std::vector<Eigen::Triplet<double>> tripletList;
-  tripletList.reserve(X->nonZeros()); // upper bound
-
-  // We'll also count how many rowMask & colMask are true (to size the new matrix).
+  // -------------------------------------------------------------
+  // Build the reduced matrix X_i = X[rowMask, colMask]
+  // -------------------------------------------------------------
   int newN = 0;
   int newM = 0;
-
-  // Build an index mapping from old row -> new row index
-  // and old col -> new col index
-  std::vector<int> rowMap(n, -1);
-  std::vector<int> colMap(m, -1);
+  std::vector<int> rowMap(n, -1), colMap(m, -1);
 
   {
-    int rCount = 0;
+    int idx = 0;
     for (int r = 0; r < n; ++r) {
       if (rowMask[r]) {
-        rowMap[r] = rCount;
-        rCount++;
+        rowMap[r] = idx++;
       }
     }
-    newN = rCount;
+    newN = idx;
   }
   {
-    int cCount = 0;
+    int idx = 0;
     for (int c = 0; c < m; ++c) {
       if (colMask[c]) {
-        colMap[c] = cCount;
-        cCount++;
+        colMap[c] = idx++;
       }
     }
-    newM = cCount;
+    newM = idx;
   }
 
-  // Now iterate again
+  std::vector<Eigen::Triplet<double>> triplets;
+  triplets.reserve(X->nonZeros());
+
   for (int c = 0; c < m; ++c) {
     if (!colMask[c]) continue;
     for (SparseMatrixD::InnerIterator it(*X, c); it; ++it) {
       int r = it.row();
-      if (!rowMask[r]) continue;
-      // Keep it
-      tripletList.emplace_back(rowMap[r], colMap[c], it.value());
+      if (rowMask[r]) {
+        triplets.emplace_back(rowMap[r], colMap[c], it.value());
+      }
     }
   }
 
-  // Create a new sparse matrix from the triplets
   SparseMatrixD *X_new = new SparseMatrixD(newN, newM);
-  X_new->setFromTriplets(tripletList.begin(), tripletList.end());
+  X_new->setFromTriplets(triplets.begin(), triplets.end());
+  Rcpp::XPtr<SparseMatrixD> X_i_ptr(X_new, true);
 
-  // Wrap in an external pointer so R sees it as a "reference to a sparse matrix"
-  Rcpp::XPtr<SparseMatrixD> X_i(X_new, true);
-
-  // --------------------------------------------------------------------------
-  // y_i <- y_i[ rowMask ]
-  // We'll return that as a numeric vector
-  // --------------------------------------------------------------------------
-  Rcpp::NumericVector y_i_new(newN);
+  // -------------------------------------------------------------
+  // Build new y_i (subset of original y_i)
+  // -------------------------------------------------------------
+  Eigen::VectorXd *Y_new = new Eigen::VectorXd(newN);
   {
     int idx = 0;
     for (int r = 0; r < n; ++r) {
       if (rowMask[r]) {
-        y_i_new[idx] = y_i[r];
-        idx++;
+        (*Y_new)(idx++) = (*Yptr)(r);
       }
     }
   }
+  Rcpp::XPtr<Eigen::VectorXd> Y_i_ptr(Y_new, true);
 
-  // --------------------------------------------------------------------------
-  // z_e <- (z - z_i)[ colMask ]
-  // i.e. a vector of length newM
-  // --------------------------------------------------------------------------
-  Rcpp::NumericVector z_e(newM);
+  // -------------------------------------------------------------
+  // Build z_e = (z - z_i)[colMask]
+  // -------------------------------------------------------------
+  Eigen::VectorXd Z_diff = (*Zptr) - z_i; // length m
+  Eigen::VectorXd *Z_e_new = new Eigen::VectorXd(newM);
+
   {
     int idx = 0;
     for (int c = 0; c < m; ++c) {
       if (colMask[c]) {
-        z_e[idx] = (z[c] - z_i[c]);
-        idx++;
+        (*Z_e_new)(idx++) = Z_diff[c];
       }
     }
   }
+  Rcpp::XPtr<Eigen::VectorXd> Z_e_ptr(Z_e_new, true);
 
-  // --------------------------------------------------------------------------
-  // Also return the row/column masks:
-  //    mask_y = inner (rowMask)
-  //    mask_X = !var0 (colMask)
-  //
-  // We'll return them as logical vectors in R
-  // --------------------------------------------------------------------------
+  // -------------------------------------------------------------
+  // Build R logical vectors for rowMask, colMask
+  // -------------------------------------------------------------
   Rcpp::LogicalVector mask_y(n), mask_X(m);
   for (int r = 0; r < n; ++r) {
     mask_y[r] = rowMask[r];
@@ -490,154 +502,106 @@ Rcpp::List reduce_X_y_cpp(SEXP Xptr,
     mask_X[c] = colMask[c];
   }
 
-  // Finally, return everything as an R list
+  // -------------------------------------------------------------
+  // Return as list
+  // -------------------------------------------------------------
   return Rcpp::List::create(
-    Rcpp::Named("X_i")    = X_i,
-    Rcpp::Named("y_i")    = y_i_new,
+    Rcpp::Named("X_i")    = X_i_ptr,
+    Rcpp::Named("y_i")    = Y_i_ptr,
     Rcpp::Named("mask_y") = mask_y,
     Rcpp::Named("mask_X") = mask_X,
-    Rcpp::Named("z_e")    = z_e
+    Rcpp::Named("z_e")    = Z_e_ptr
   );
 }
 
 
-/*
- * round_cells_cpp
- * 
- * Translated from your R function:
+/**
+ * round_cells_cpp:
+ *   - Xptr      : XPtr<SparseMatrix<double>>
+ *   - y_ptr     : XPtr<VectorXd> (length n)
+ *   - b         : double
+ *   - n_b       : int
+ *   - max_iter  : int
+ *   - z_e_ptr   : XPtr<VectorXd> (length m)
+ *   - seed      : int
  *
- *   round_cells <- function(X, y, z=NULL, y0=NULL, b, n_b, 
- *                           M=NULL, max.iter=1000, z_e, seed = 1234) { ... }
+ * Always internally computes:
+ *   z   = X^T * y + z_e
+ *   y_i = 0-vector of length n
+ *   M   = b * (X * X^T)  [dense n x n]
  *
- * Arguments:
- *  - Xptr     : External pointer to an (n x m) sparse matrix (X).
- *  - y        : NumericVector of length n.
- *  - z_       : (Optional) NumericVector of length m, if null => we compute z = t(X)*y + z_e
- *  - y0_      : (Optional) NumericVector of length n; if null => start with y_i=0
- *  - b        : double
- *  - n_b      : int
- *  - M_       : (Optional) NxN numeric matrix (if null => M = b * (X * X^T) ).
- *  - max_iter : maximum # of iterations in the second loop (default 1000)
- *  - z_e      : NumericVector of length m
- *  - seed     : int random seed
- *
- * Returns: A NumericVector (length n) = final y_i
+ * Returns: XPtr<VectorXd> pointing to the final y_i (length n).
  */
-
 // [[Rcpp::export]]
-Rcpp::NumericVector round_cells_cpp(
-    SEXP Xptr, 
-    const Rcpp::NumericVector &y, 
-    double b, 
-    int n_b,
-    int max_iter ,
-    const Rcpp::NumericVector &z_e,
-    int seed,
-    Rcpp::Nullable<Rcpp::NumericVector> z_=R_NilValue,
-    Rcpp::Nullable<Rcpp::NumericVector> y0_=R_NilValue,
-    Rcpp::Nullable<Rcpp::NumericMatrix> M_=R_NilValue
-)
+SEXP round_cells_cpp(SEXP Xptr,
+                     SEXP y_ptr,
+                     double b,
+                     int n_b,
+                     int max_iter,
+                     SEXP z_e_ptr,
+                     int seed)
 {
-  // 1) Get the sparse matrix X (n x m) from the external pointer
+  // 1) Get the sparse matrix X
   Rcpp::XPtr<SparseMatrixD> Xp(Xptr);
   SparseMatrixD &X = *Xp; 
-  const int n = X.rows();   // # rows
-  const int m = X.cols();   // # cols
+  const int n = X.rows();
+  const int m = X.cols();
 
-  // Basic checks
-  if (y.size() != (size_t)n) {
-    Rcpp::stop("Length of y must match the number of rows in X.");
-  }
-  if (z_e.size() != (size_t)m) {
-    Rcpp::stop("Length of z_e must match the number of columns in X.");
+  // 2) Get y
+  Rcpp::XPtr<Eigen::VectorXd> Yp(y_ptr);
+  if (Yp->size() != n) {
+    Rcpp::stop("Length of y must match # of rows in X.");
   }
 
-  // 2) Convert y to an Eigen vector
-  Eigen::Map<const Eigen::VectorXd> Y_map(y.begin(), n);
-
-  // 3) Prepare z (length m). If z is null => z = t(X)*y + z_e
-  Eigen::VectorXd Z(m);
-  if (z_.isNotNull()) {
-    Rcpp::NumericVector z_in(z_);
-    if ((int)z_in.size() != m) {
-      Rcpp::stop("z has incorrect length (must be m).");
-    }
-    for (int col = 0; col < m; col++) {
-      Z[col] = z_in[col];
-    }
-  } else {
-    // Compute t(X)*y (which is length m), then add z_e
-    Eigen::VectorXd XTy = X.transpose() * Y_map;  // (m x 1)
-    for (int col = 0; col < m; col++) {
-      Z[col] = XTy[col] + z_e[col];
-    }
+  // 3) Get z_e
+  Rcpp::XPtr<Eigen::VectorXd> Zep(z_e_ptr);
+  if (Zep->size() != m) {
+    Rcpp::stop("Length of z_e must match # of cols in X.");
   }
 
-  // 4) Define y_i. If y0 was given, use it; else all zeros.
-  Rcpp::NumericVector y_i;
-  if (y0_.isNotNull()) {
-    Rcpp::NumericVector y0(y0_);
-    if ((int)y0.size() != n) {
-      Rcpp::stop("y0 must have length n.");
-    }
-    // Make a copy so we can modify it
-    y_i = Rcpp::clone(y0);
-  } else {
-    // length n, fill with 0
-    y_i = Rcpp::NumericVector(n, 0.0);
-  }
+  // 4) Compute z = X^T y + z_e
+  Eigen::VectorXd z = X.transpose() * (*Yp); // length m
+  z += (*Zep); // now z is X^T y + z_e
 
-  // 5) Define M (n x n). If given, just use it. Otherwise compute b * (X * X^T).
-  Eigen::MatrixXd M_mat;  // NxN
-  if (M_.isNotNull()) {
-    Rcpp::NumericMatrix M_in(M_);
-    if (M_in.nrow() != n || M_in.ncol() != n) {
-      Rcpp::stop("M must be an n x n matrix.");
-    }
-    // Copy M_in into an Eigen dense matrix
-    M_mat = Eigen::Map<const Eigen::MatrixXd>(M_in.begin(), n, n);
-  } else {
-    // M = b * (X * X^T) => n x n
-    // X is n x m => X^T is m x n => product is n x n
-    // We'll store in a dense matrix
-    // This can be expensive for large n!
-    Eigen::MatrixXd XXt = (X * X.transpose()).toDense();
-    M_mat = b * XXt;
-  }
+  // 5) Create y_i (length n) = all 0
+  Eigen::VectorXd *Y_i = new Eigen::VectorXd(n);
+  Y_i->setZero();  // fill with 0
 
-  // 6) c_i = X %*% Z => length n
-  Eigen::VectorXd c_i = X * Z;  // (n x 1)
+  // 6) Compute M = b * (X * X^T) as a dense matrix (n x n)
+  Eigen::MatrixXd M_mat = (X * X.transpose()).toDense();
+  M_mat *= b;
 
-  // 7) Set up RNG for sampling
+  // 7) c_i = X * z  (length n)
+  Eigen::VectorXd c_i = X * z;
+
+  // 8) RNG
   std::mt19937 rng(seed);
 
   // -------------------------------------------------------------------------
-  // PART A: for (i in seq_len(n_b)) { ... }
+  // PART A: for (i in seq_len(n_b))
   // -------------------------------------------------------------------------
   int i = 0;
   for (; i < n_b; i++) {
-    // m <- max(c_i[y_i == 0])
+    // find max c_i[r] among those with Y_i[r] == 0
     double max_val = -std::numeric_limits<double>::infinity();
     for (int r = 0; r < n; r++) {
-      if (y_i[r] == 0.0 && c_i[r] > max_val) {
+      if ((*Y_i)[r] == 0.0 && c_i[r] > max_val) {
         max_val = c_i[r];
       }
     }
-
-    // k <- which(c_i == m & y_i == 0)
-    // gather the candidate indices
+    // gather all r that achieve this max_val
     std::vector<int> candidates;
     for (int r = 0; r < n; r++) {
-      if (y_i[r] == 0.0 && std::fabs(c_i[r] - max_val) < 1e-15) {
+      if ((*Y_i)[r] == 0.0 && std::fabs(c_i[r] - max_val) < 1e-15) {
         candidates.push_back(r);
       }
     }
     if (candidates.empty()) {
-      // means no row with y_i[r]==0 => break out of loop
+      // no row with Y_i[r]==0 => break
       break;
     }
 
-    // If length(k)>1 => pick one at random
+    // random tie-break
     int chosen;
     if (candidates.size() == 1) {
       chosen = candidates[0];
@@ -646,47 +610,41 @@ Rcpp::NumericVector round_cells_cpp(
       chosen = candidates[dist(rng)];
     }
 
-    // y_i[chosen] = b
-    y_i[chosen] = b;
+    // set Y_i[chosen] = b
+    (*Y_i)[chosen] = b;
 
     // c_i = c_i - M[chosen, ]
-    // row "chosen" of M => we subtract from each element of c_i
     for (int r = 0; r < n; r++) {
       c_i[r] -= M_mat(chosen, r);
     }
   }
 
   // -------------------------------------------------------------------------
-  // PART B: while (i < max.iter) { i <- i+1; ... }
+  // PART B: while (i < max_iter)
   // -------------------------------------------------------------------------
   double last_k_max = -std::numeric_limits<double>::infinity();
-  double last_k_min =  std::numeric_limits<double>::infinity(); 
-  // The R code sets last_k_min but never uses it. We still track it for completeness.
-  
-  // "last_y_i <- y_i" in R. We'll store a copy here:
-  Rcpp::NumericVector last_y_i = Rcpp::clone(y_i);
+  // double last_k_min =  std::numeric_limits<double>::infinity();  // R code had it but never used it
+  Eigen::VectorXd last_y_i = *Y_i;  // copy current y_i
 
   while (i < max_iter) {
     i++;
 
-    // k_min <- min(c_i[y_i != 0])
+    // k_min = min c_i[r] among r with Y_i[r] != 0
     double min_val =  std::numeric_limits<double>::infinity();
     for (int r = 0; r < n; r++) {
-      if (y_i[r] != 0.0 && c_i[r] < min_val) {
+      if ((*Y_i)[r] != 0.0 && c_i[r] < min_val) {
         min_val = c_i[r];
       }
     }
-
-    // k_min_i <- which(c_i == min_val & y_i != 0)
+    // gather all r that achieve min_val
     std::vector<int> min_candidates;
     for (int r = 0; r < n; r++) {
-      if (y_i[r] != 0.0 && std::fabs(c_i[r] - min_val) < 1e-15) {
+      if ((*Y_i)[r] != 0.0 && std::fabs(c_i[r] - min_val) < 1e-15) {
         min_candidates.push_back(r);
       }
     }
     if (min_candidates.empty()) {
-      // No row with y_i != 0 => break
-      break;
+      break; 
     }
 
     int chosen_min;
@@ -697,28 +655,26 @@ Rcpp::NumericVector round_cells_cpp(
       chosen_min = min_candidates[dist(rng)];
     }
 
-    // c_i <- c_i + M[chosen_min, ]
+    // c_i += M[chosen_min, ]
     for (int r = 0; r < n; r++) {
       c_i[r] += M_mat(chosen_min, r);
     }
 
-    // k_max <- max(c_i[y_i == 0])
+    // k_max = max c_i[r] among r with Y_i[r] == 0
     double max_val = -std::numeric_limits<double>::infinity();
     for (int r = 0; r < n; r++) {
-      if (y_i[r] == 0.0 && c_i[r] > max_val) {
+      if ((*Y_i)[r] == 0.0 && c_i[r] > max_val) {
         max_val = c_i[r];
       }
     }
-
-    // k_max_i <- which(c_i == max_val & y_i == 0)
+    // gather all r that achieve max_val
     std::vector<int> max_candidates;
     for (int r = 0; r < n; r++) {
-      if (y_i[r] == 0.0 && std::fabs(c_i[r] - max_val) < 1e-15) {
+      if ((*Y_i)[r] == 0.0 && std::fabs(c_i[r] - max_val) < 1e-15) {
         max_candidates.push_back(r);
       }
     }
     if (max_candidates.empty()) {
-      // No row with y_i == 0 => break
       break;
     }
 
@@ -730,32 +686,28 @@ Rcpp::NumericVector round_cells_cpp(
       chosen_max = max_candidates[dist(rng)];
     }
 
-    // if (k_min >= k_max) break
+    // if (k_min >= k_max) => break
     if (min_val >= max_val) {
       break;
-    } 
-    // else if (k_max <= last_k_max) { y_i <- last_y_i; break }
-    else if (max_val <= last_k_max) {
-      y_i = Rcpp::clone(last_y_i);
+    } else if (max_val <= last_k_max) {
+      // y_i <- last_y_i
+      *Y_i = last_y_i;
       break;
     }
 
-    // c_i <- c_i - M[chosen_max, ]
+    // c_i -= M[chosen_max, ]
     for (int r = 0; r < n; r++) {
       c_i[r] -= M_mat(chosen_max, r);
     }
 
-    // y_i[chosen_min] <- 0
-    // y_i[chosen_max] <- b
-    y_i[chosen_min] = 0.0;
-    y_i[chosen_max] = b;
+    // y_i[chosen_min] = 0;  y_i[chosen_max] = b
+    (*Y_i)[chosen_min] = 0.0;
+    (*Y_i)[chosen_max] = b;
 
-    // last_k_max <- k_max
     last_k_max = max_val;
-    // last_y_i <- y_i
-    last_y_i = Rcpp::clone(y_i);
+    last_y_i = *Y_i;
   }
 
-  // Return final y_i
-  return y_i;
+  // Return the final y_i as an external pointer
+  return Rcpp::XPtr<Eigen::VectorXd>(Y_i, true);
 }
