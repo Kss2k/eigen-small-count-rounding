@@ -13,7 +13,27 @@ non_zeros_sparse_matrix <- function(mat_xptr) {
     .Call('_EigenSmallCountRounding_non_zeros_sparse_matrix', PACKAGE = 'EigenSmallCountRounding', mat_xptr)
 }
 
-print_sparse_matrix <- function(M) {
-    invisible(.Call('_EigenSmallCountRounding_print_sparse_matrix', PACKAGE = 'EigenSmallCountRounding', M))
+print_sparse_matrix <- function(mat_xptr) {
+    invisible(.Call('_EigenSmallCountRounding_print_sparse_matrix', PACKAGE = 'EigenSmallCountRounding', mat_xptr))
+}
+
+calc_z <- function(mat_xptr, y_i) {
+    .Call('_EigenSmallCountRounding_calc_z', PACKAGE = 'EigenSmallCountRounding', mat_xptr, y_i)
+}
+
+calc_M <- function(xptr_X, b) {
+    .Call('_EigenSmallCountRounding_calc_M', PACKAGE = 'EigenSmallCountRounding', xptr_X, b)
+}
+
+calc_c <- function(mat_xptr, z_i) {
+    .Call('_EigenSmallCountRounding_calc_c', PACKAGE = 'EigenSmallCountRounding', mat_xptr, z_i)
+}
+
+reduce_X_y_cpp <- function(Xptr, y_i, b, z) {
+    .Call('_EigenSmallCountRounding_reduce_X_y_cpp', PACKAGE = 'EigenSmallCountRounding', Xptr, y_i, b, z)
+}
+
+round_cells_cpp <- function(Xptr, y, b, n_b, max_iter, z_e, seed, z_ = NULL, y0_ = NULL, M_ = NULL) {
+    .Call('_EigenSmallCountRounding_round_cells_cpp', PACKAGE = 'EigenSmallCountRounding', Xptr, y, b, n_b, max_iter, z_e, seed, z_, y0_, M_)
 }
 
