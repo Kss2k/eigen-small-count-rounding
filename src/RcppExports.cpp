@@ -24,13 +24,13 @@ BEGIN_RCPP
 END_RCPP
 }
 // create_dummy_cpp
-SEXP create_dummy_cpp(const Rcpp::CharacterMatrix& groupings_inner, const Rcpp::CharacterMatrix& groupings_publish);
+SEXP create_dummy_cpp(const Rcpp::IntegerMatrix& groupings_inner, const Rcpp::IntegerMatrix& groupings_publish);
 RcppExport SEXP _EigenSmallCountRounding_create_dummy_cpp(SEXP groupings_innerSEXP, SEXP groupings_publishSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< const Rcpp::CharacterMatrix& >::type groupings_inner(groupings_innerSEXP);
-    Rcpp::traits::input_parameter< const Rcpp::CharacterMatrix& >::type groupings_publish(groupings_publishSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::IntegerMatrix& >::type groupings_inner(groupings_innerSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::IntegerMatrix& >::type groupings_publish(groupings_publishSEXP);
     rcpp_result_gen = Rcpp::wrap(create_dummy_cpp(groupings_inner, groupings_publish));
     return rcpp_result_gen;
 END_RCPP
@@ -56,15 +56,46 @@ BEGIN_RCPP
     return R_NilValue;
 END_RCPP
 }
+// print_VectorXd
+void print_VectorXd(SEXP xptr);
+RcppExport SEXP _EigenSmallCountRounding_print_VectorXd(SEXP xptrSEXP) {
+BEGIN_RCPP
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< SEXP >::type xptr(xptrSEXP);
+    print_VectorXd(xptr);
+    return R_NilValue;
+END_RCPP
+}
+// print_VectorXi
+void print_VectorXi(SEXP xptr);
+RcppExport SEXP _EigenSmallCountRounding_print_VectorXi(SEXP xptrSEXP) {
+BEGIN_RCPP
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< SEXP >::type xptr(xptrSEXP);
+    print_VectorXi(xptr);
+    return R_NilValue;
+END_RCPP
+}
 // calc_z
-Rcpp::NumericVector calc_z(SEXP mat_xptr, const Rcpp::NumericVector& y_i);
-RcppExport SEXP _EigenSmallCountRounding_calc_z(SEXP mat_xptrSEXP, SEXP y_iSEXP) {
+SEXP calc_z(SEXP xptr_M, SEXP xptr_y);
+RcppExport SEXP _EigenSmallCountRounding_calc_z(SEXP xptr_MSEXP, SEXP xptr_ySEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< SEXP >::type mat_xptr(mat_xptrSEXP);
-    Rcpp::traits::input_parameter< const Rcpp::NumericVector& >::type y_i(y_iSEXP);
-    rcpp_result_gen = Rcpp::wrap(calc_z(mat_xptr, y_i));
+    Rcpp::traits::input_parameter< SEXP >::type xptr_M(xptr_MSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type xptr_y(xptr_ySEXP);
+    rcpp_result_gen = Rcpp::wrap(calc_z(xptr_M, xptr_y));
+    return rcpp_result_gen;
+END_RCPP
+}
+// copy_xptr_VectorXd
+SEXP copy_xptr_VectorXd(SEXP xptr);
+RcppExport SEXP _EigenSmallCountRounding_copy_xptr_VectorXd(SEXP xptrSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< SEXP >::type xptr(xptrSEXP);
+    rcpp_result_gen = Rcpp::wrap(copy_xptr_VectorXd(xptr));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -128,6 +159,32 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// fill_vector_by_mask
+void fill_vector_by_mask(SEXP xptr_x, SEXP xptr_y, SEXP xptr_mask);
+RcppExport SEXP _EigenSmallCountRounding_fill_vector_by_mask(SEXP xptr_xSEXP, SEXP xptr_ySEXP, SEXP xptr_maskSEXP) {
+BEGIN_RCPP
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< SEXP >::type xptr_x(xptr_xSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type xptr_y(xptr_ySEXP);
+    Rcpp::traits::input_parameter< SEXP >::type xptr_mask(xptr_maskSEXP);
+    fill_vector_by_mask(xptr_x, xptr_y, xptr_mask);
+    return R_NilValue;
+END_RCPP
+}
+// calc_n_b
+int calc_n_b(SEXP xptr_y_i, SEXP xptr_y, SEXP xptr_y_rounded, int b);
+RcppExport SEXP _EigenSmallCountRounding_calc_n_b(SEXP xptr_y_iSEXP, SEXP xptr_ySEXP, SEXP xptr_y_roundedSEXP, SEXP bSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< SEXP >::type xptr_y_i(xptr_y_iSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type xptr_y(xptr_ySEXP);
+    Rcpp::traits::input_parameter< SEXP >::type xptr_y_rounded(xptr_y_roundedSEXP);
+    Rcpp::traits::input_parameter< int >::type b(bSEXP);
+    rcpp_result_gen = Rcpp::wrap(calc_n_b(xptr_y_i, xptr_y, xptr_y_rounded, b));
+    return rcpp_result_gen;
+END_RCPP
+}
 // round_cells_cpp
 SEXP round_cells_cpp(SEXP Xptr, SEXP y_ptr, double b, int n_b, int max_iter, SEXP z_e_ptr, int seed);
 RcppExport SEXP _EigenSmallCountRounding_round_cells_cpp(SEXP XptrSEXP, SEXP y_ptrSEXP, SEXP bSEXP, SEXP n_bSEXP, SEXP max_iterSEXP, SEXP z_e_ptrSEXP, SEXP seedSEXP) {
@@ -151,12 +208,17 @@ static const R_CallMethodDef CallEntries[] = {
     {"_EigenSmallCountRounding_create_dummy_cpp", (DL_FUNC) &_EigenSmallCountRounding_create_dummy_cpp, 2},
     {"_EigenSmallCountRounding_non_zeros_sparse_matrix", (DL_FUNC) &_EigenSmallCountRounding_non_zeros_sparse_matrix, 1},
     {"_EigenSmallCountRounding_print_sparse_matrix", (DL_FUNC) &_EigenSmallCountRounding_print_sparse_matrix, 1},
+    {"_EigenSmallCountRounding_print_VectorXd", (DL_FUNC) &_EigenSmallCountRounding_print_VectorXd, 1},
+    {"_EigenSmallCountRounding_print_VectorXi", (DL_FUNC) &_EigenSmallCountRounding_print_VectorXi, 1},
     {"_EigenSmallCountRounding_calc_z", (DL_FUNC) &_EigenSmallCountRounding_calc_z, 2},
+    {"_EigenSmallCountRounding_copy_xptr_VectorXd", (DL_FUNC) &_EigenSmallCountRounding_copy_xptr_VectorXd, 1},
     {"_EigenSmallCountRounding_calc_M", (DL_FUNC) &_EigenSmallCountRounding_calc_M, 2},
     {"_EigenSmallCountRounding_calc_c", (DL_FUNC) &_EigenSmallCountRounding_calc_c, 2},
     {"_EigenSmallCountRounding_as_numeric_vector", (DL_FUNC) &_EigenSmallCountRounding_as_numeric_vector, 1},
     {"_EigenSmallCountRounding_as_xptr_vector", (DL_FUNC) &_EigenSmallCountRounding_as_xptr_vector, 1},
     {"_EigenSmallCountRounding_reduce_X_y_cpp", (DL_FUNC) &_EigenSmallCountRounding_reduce_X_y_cpp, 4},
+    {"_EigenSmallCountRounding_fill_vector_by_mask", (DL_FUNC) &_EigenSmallCountRounding_fill_vector_by_mask, 3},
+    {"_EigenSmallCountRounding_calc_n_b", (DL_FUNC) &_EigenSmallCountRounding_calc_n_b, 4},
     {"_EigenSmallCountRounding_round_cells_cpp", (DL_FUNC) &_EigenSmallCountRounding_round_cells_cpp, 7},
     {NULL, NULL, 0}
 };

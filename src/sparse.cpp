@@ -11,6 +11,12 @@
 
 typedef Eigen::SparseMatrix<double> SparseMatrixD; // maybe use int?
 typedef Rcpp::XPtr<Eigen::SparseMatrix<double>> RSparseMatrix;
+typedef Eigen::VectorXd VectorXd;
+typedef Eigen::VectorXi VectorXi;
+typedef Eigen::MatrixXd MatrixXd;
+typedef Eigen::MatrixXi MatrixXi;
+
+#define TOTAL_C -9
 
 // [[Rcpp::export]]
 SEXP init_sparse_matrix(const int nrow, const int ncol) {
@@ -54,10 +60,9 @@ SEXP init_sparse_matrix(const int nrow, const int ncol) {
 // 
 //   return Rcpp::XPtr<SparseMatrixD>(X, true);
 
-
 // [[Rcpp::export]]
-SEXP create_dummy_cpp(const Rcpp::CharacterMatrix& groupings_inner, 
-                      const Rcpp::CharacterMatrix& groupings_publish) 
+SEXP create_dummy_cpp(const Rcpp::IntegerMatrix& groupings_inner, 
+                      const Rcpp::IntegerMatrix& groupings_publish) 
 {
   const int n = groupings_inner.nrow();
   const int k = groupings_inner.ncol();  // must match groupings_publish.ncol()
@@ -67,82 +72,23 @@ SEXP create_dummy_cpp(const Rcpp::CharacterMatrix& groupings_inner,
     Rcpp::stop("groupings_inner and groupings_publish must have the same number of columns");
   }
 
-  //-------------------------------------------------------------------------
-  // 1) Collect unique strings from both matrices, assign them integer codes.
-  //    We'll store "__total__" as a special code = -1.
-  //-------------------------------------------------------------------------
-  std::unordered_map<std::string,int> dict;
-  dict.reserve(n * k + m * k); // just a rough reserve
 
-  // We'll track the next code to assign:
-  int nextCode = 0;
-
-  auto getOrAssignCode = [&](const std::string &s) -> int {
-    // Special rule for "__total__"
-    if (s == "__total__") {
-      return -1;  // wildcard code
-    }
-    // Otherwise, look up in dict
-    auto it = dict.find(s);
-    if (it == dict.end()) {
-      // not found, assign new code
-      int code = nextCode;
-      dict[s] = code;
-      nextCode++;
-      return code;
-    } else {
-      return it->second;
-    }
-  };
-
-  //-------------------------------------------------------------------------
-  // 2) Build integer-coded matrices:
-  //    inner_codes (n x k), publish_codes (m x k).
-  //-------------------------------------------------------------------------
-  // We'll store them in row-major order for convenience, but
-  // an Eigen::MatrixXi with n rows, k cols is also possible.
-
-  // Using a simple std::vector<int> for the 2D data:
-  std::vector<int> inner_codes(n*k), publish_codes(m*k);
-
-  // Fill inner_codes
-  for (int i = 0; i < n; i++) {
-    for (int col = 0; col < k; col++) {
-      std::string s = Rcpp::as<std::string>(groupings_inner(i, col));
-      inner_codes[i*k + col] = getOrAssignCode(s);
-    }
-  }
-
-  // Fill publish_codes
-  for (int j = 0; j < m; j++) {
-    for (int col = 0; col < k; col++) {
-      std::string s = Rcpp::as<std::string>(groupings_publish(j, col));
-      publish_codes[j*k + col] = getOrAssignCode(s);
-    }
-  }
-
-  //-------------------------------------------------------------------------
-  // 3) Create triplets by comparing each row i in [0..n) with row j in [0..m).
-  //    If for all col l in [0..k), either:
-  //       publish_codes(j,l) == -1  (wildcard)
-  //    or publish_codes(j,l) == inner_codes(i,l),
-  //    => push triplet (i, j, 1).
-  //-------------------------------------------------------------------------
   std::vector<Eigen::Triplet<double>> triplet_list;
   // If many rows match, you might want to carefully guess a capacity,
   // but n*m might be huge. We'll reserve something smaller if you want.
   triplet_list.reserve(std::min((size_t)n*m, (size_t)1000000)); // e.g., 1e6
 
   for (int i = 0; i < n; i++) {
-    const int *rowI = &inner_codes[i*k];  // pointer to row i
+    Rcpp::IntegerMatrix::ConstRow rowI = groupings_inner(i, Rcpp::_);
+    
     for (int j = 0; j < m; j++) {
-      const int *rowJ = &publish_codes[j*k];  // pointer to row j
+      Rcpp::IntegerMatrix::ConstRow rowJ = groupings_publish(j, Rcpp::_);
 
       bool match = true;
       for (int col = 0; col < k; col++) {
         int pub_val = rowJ[col];
         // If pub_val != -1 and also != rowI[col], we have mismatch
-        if (pub_val != -1 && pub_val != rowI[col]) {
+        if (pub_val != TOTAL_C && pub_val != rowI[col]) {
           match = false;
           break;
         }
@@ -153,9 +99,6 @@ SEXP create_dummy_cpp(const Rcpp::CharacterMatrix& groupings_inner,
     }
   }
 
-  //-------------------------------------------------------------------------
-  // 4) Build the (n x m) sparse matrix from the triplets and return as XPtr
-  //-------------------------------------------------------------------------
   SparseMatrixD *X = new SparseMatrixD(n, m);
   X->setFromTriplets(triplet_list.begin(), triplet_list.end());
 
@@ -184,17 +127,39 @@ void print_sparse_matrix(SEXP mat_xptr) {
 
 
 // [[Rcpp::export]]
-Rcpp::NumericVector calc_z(SEXP mat_xptr, const Rcpp::NumericVector &y_i) {
-  Rcpp::XPtr<SparseMatrixD> xptr(mat_xptr);
-  SparseMatrixD M = *xptr;
+void print_VectorXd(SEXP xptr) {
+  Rcpp::XPtr<VectorXd> ptr(xptr);
+  Rcpp::Rcout << *ptr << std::endl;
+}
 
-  // Map y_i to an Eigen vector
-  Eigen::Map<const Eigen::VectorXd> Y(y_i.begin(), y_i.size());
+
+// [[Rcpp::export]]
+void print_VectorXi(SEXP xptr) {
+  Rcpp::XPtr<VectorXi> ptr(xptr);
+  Rcpp::Rcout << *ptr << std::endl;
+}
+
+
+// [[Rcpp::export]]
+SEXP calc_z(SEXP xptr_M, SEXP xptr_y) {
+  Rcpp::XPtr<SparseMatrixD> ptr_M(xptr_M);
+  Rcpp::XPtr<VectorXd> ptr_y(xptr_y);
+  SparseMatrixD M = *ptr_M;
+  VectorXd y = *ptr_y; 
 
   // z will have length m
-  Eigen::VectorXd z = M.transpose() * Y;  // (m x n) * (n x 1) = (m x 1)
+  VectorXd z = M.transpose() * y;  // (m x n) * (n x 1) = (m x 1)
+  
+  return Rcpp::XPtr<VectorXd>(new VectorXd(z), true);
+}
 
-  return Rcpp::NumericVector(z.data(), z.data() + z.size());
+
+// [[Rcpp::export]]
+SEXP copy_xptr_VectorXd(SEXP xptr) {
+  Rcpp::XPtr<VectorXd> ptr(xptr);
+  VectorXd *copy = new VectorXd(*ptr);
+
+  return Rcpp::XPtr<VectorXd>(copy, true);
 }
 
 
@@ -214,10 +179,10 @@ Rcpp::NumericVector calc_c(SEXP mat_xptr, const Rcpp::NumericVector &z_i) {
   SparseMatrixD M = *xptr;
 
   // Map y_i to an Eigen vector
-  Eigen::Map<const Eigen::VectorXd> Z(z_i.begin(), z_i.size());
+  Eigen::Map<const VectorXd> Z(z_i.begin(), z_i.size());
 
   // z will have length m
-  Eigen::VectorXd c = M * Z;  // (m x n) * (n x 1) = (m x 1)
+  VectorXd c = M * Z;  // (m x n) * (n x 1) = (m x 1)
 
   return Rcpp::NumericVector(c.data(), c.data() + c.size());
 }
@@ -225,37 +190,42 @@ Rcpp::NumericVector calc_c(SEXP mat_xptr, const Rcpp::NumericVector &z_i) {
 
 // [[Rcpp::export]]
 Rcpp::NumericVector as_numeric_vector(SEXP vec_xptr) {
-  Rcpp::XPtr<Eigen::VectorXd> xptr(vec_xptr);
-  Eigen::VectorXd vec = *xptr;
+  Rcpp::XPtr<VectorXd> xptr(vec_xptr);
+  VectorXd vec = *xptr;
   return Rcpp::NumericVector(vec.data(), vec.data() + vec.size());
 }
 
 
 // [[Rcpp::export]]
 SEXP as_xptr_vector(const Rcpp::NumericVector &vec) {
-  Eigen::VectorXd *v = new Eigen::VectorXd(vec.size());
+  VectorXd *v = new VectorXd(vec.size());
   for (int i = 0; i < vec.size(); i++) {
     (*v)(i) = vec[i];
   }
-  return Rcpp::XPtr<Eigen::VectorXd>(v, true);
+  return Rcpp::XPtr<VectorXd>(v, true);
 }
 
 
-/**
- * reduce_X_y_cpp (Faster Version)
- *
- *  - Xptr      : External pointer to n x m SparseMatrix<double>
- *  - y_i_ptr   : External pointer to length-n VectorXd
- *  - b         : double threshold
- *  - z_ptr     : External pointer to length-m VectorXd
- *
- * Returns an R list with:
- *   - X_i   : XPtr<SparseMatrix<double>> (the reduced X)
- *   - y_i   : XPtr<VectorXd>            (the reduced y)
- *   - mask_y: R logical vector (length n)
- *   - mask_X: R logical vector (length m)
- *   - z_e   : XPtr<VectorXd>            (the subset of (z - z_i))
- */
+SparseMatrixD get_subsetter_matrix(const VectorXi &x) {
+  std::vector<Eigen::Triplet<double>> triplets;
+  triplets.reserve(x.sum());
+
+  int j = 0;
+  for (int i = 0; i < x.size(); i++) {
+    if (x(i)) {
+      triplets.emplace_back(i, j, 1.0);
+      j++;
+    }
+  }
+
+  // Create the sparse Matrix
+  SparseMatrixD M(x.size(), j);
+  M.setFromTriplets(triplets.begin(), triplets.end());
+
+  return M;
+}
+
+
 // [[Rcpp::export]]
 Rcpp::List reduce_X_y_cpp(SEXP Xptr,
                           SEXP y_i_ptr,
@@ -268,250 +238,102 @@ Rcpp::List reduce_X_y_cpp(SEXP Xptr,
   const int m = X->cols();
 
   // 2) Convert y_i_ptr -> an Eigen vector
-  Rcpp::XPtr<Eigen::VectorXd> Yptr(y_i_ptr);
+  Rcpp::XPtr<VectorXd> Yptr(y_i_ptr);
   if (Yptr->size() != n) {
     Rcpp::stop("Size of y_i must match # of rows in X.");
   }
 
   // 3) Convert z_ptr -> an Eigen vector
-  Rcpp::XPtr<Eigen::VectorXd> Zptr(z_ptr);
+  Rcpp::XPtr<VectorXd> Zptr(z_ptr);
   if (Zptr->size() != m) {
     Rcpp::stop("Size of z must match # of cols in X.");
   }
 
-  // 4) Compute z_i = t(X) * y_i  (length = m)
-  Eigen::VectorXd z_i = X->transpose() * (*Yptr);
-
-  // 5) If !any(z_i < b), return (X=NULL, y=NULL)
-  bool anyBelowB = false;
-  for (int c = 0; c < m; ++c) {
-    if (z_i[c] < b) {
-      anyBelowB = true;
-      break;
-    }
-  }
-  if (!anyBelowB) {
+  VectorXd z_i = X->transpose() * (*Yptr);
+  // Eigen::ArrayXd = z_i.array();
+  if (!(z_i.array() < b).any()) {
     return Rcpp::List::create(
-      Rcpp::Named("X_i") = R_NilValue,
-      Rcpp::Named("y_i") = R_NilValue
-    );
+        Rcpp::Named("X_i") = R_NilValue,
+        Rcpp::Named("y_i") = R_NilValue
+        );
   }
 
-  // -------------------------------------------------------------
-  // Build colMaskB[c] = (z_i[c] < b).
-  // Then rowMask[r] = true if row r has any positive entry
-  // in columns c where colMaskB[c] = true.
-  // -------------------------------------------------------------
-  std::vector<bool> colMaskB(m, false);
-  for (int c = 0; c < m; ++c) {
-    colMaskB[c] = (z_i[c] < b);
-  }
 
-  std::vector<bool> rowMask(n, false);
+  VectorXi z_less_b = (z_i.array() < b).cast<int>();
+  SparseMatrixD X_sub_cols = *X * get_subsetter_matrix(z_less_b);
 
-  for (int c = 0; c < m; ++c) {
-    if (!colMaskB[c]) continue;
-    for (SparseMatrixD::InnerIterator it(*X, c); it; ++it) {
-      if (it.value() > 0.0) {
-        rowMask[it.row()] = true;
-      }
+  VectorXi inner = VectorXi::Zero(n);
+  for (int j = 0; j < X_sub_cols.outerSize(); j++) {
+    for (SparseMatrixD::InnerIterator it(X_sub_cols, j); it; ++it) {
+      // double val = it.value();
+      int i = it.row();
+      inner(i) = 1;
     }
   }
 
-  // -------------------------------------------------------------
-  // var0[c] = "all the same" among the rows where rowMask[r] is true.
-  // We'll do a single pass over the column's nonzeros to discover
-  // up to two distinct values (0 vs. nonzero).
-  // -------------------------------------------------------------
-  std::vector<bool> var0(m, false);
+  SparseMatrixD inner_row_subsetter = get_subsetter_matrix(inner);
+  SparseMatrixD X_sub_rows = inner_row_subsetter.transpose() * (*X);
 
-  // Precompute how many rows are "inner" => included
-  int countIncluded = 0;
-  for (int r = 0; r < n; ++r) {
-    if (rowMask[r]) {
-      countIncluded++;
-    }
+  const int n_sub_rows = X_sub_rows.rows();
+  VectorXi non_zero_var = VectorXi::Ones(m);
+  for (int j = 0; j < X_sub_rows.outerSize(); j++) {
+    int n_non_zero = 0;
+    for (SparseMatrixD::InnerIterator it(X_sub_rows, j); it; ++it)
+      n_non_zero++;
+     
+    if (n_non_zero == 0 || n_non_zero == n_sub_rows)
+      non_zero_var(j) = 0;
   }
 
-  for (int c = 0; c < m; ++c) {
-    // If 0 or 1 row is included, there's no variation
-    if (countIncluded <= 1) {
-      var0[c] = true;
-      continue;
-    }
 
-    // We'll gather up to 2 distinct values among included rows
-    // (0 is implicitly used for rows not in the column's nonzeros)
-    std::vector<double> distinctVals;
-    distinctVals.reserve(2);
+  SparseMatrixD non_v0_col_subsetter = get_subsetter_matrix(non_zero_var);
 
-    // Count how many included rows appear as nonzero
-    int foundCount = 0;
+  SparseMatrixD X_i = inner_row_subsetter.transpose() * (*X) * non_v0_col_subsetter;
+  VectorXd y_i = inner_row_subsetter.transpose() * (*Yptr);
+  VectorXd z_e = non_v0_col_subsetter.transpose() * (*Zptr - z_i);
 
-    for (SparseMatrixD::InnerIterator it(*X, c); it; ++it) {
-      int r = it.row();
-      if (!rowMask[r]) continue;  // skip rows not in "inner"
-      double val = it.value();
-      foundCount++;
 
-      // Insert into distinctVals (up to 2):
-      if (distinctVals.empty()) {
-        distinctVals.push_back(val);
-      } else if (distinctVals.size() == 1) {
-        if (std::fabs(val - distinctVals[0]) > 1e-15) {
-          // It's genuinely different
-          distinctVals.push_back(val);
-          // Now we have 2 distinct values => can break
-          break;
-        }
-      } else {
-        // distinctVals.size() == 2 => definitely variation
-        break;
-      }
-    }
-
-    // If we ended the loop with >2 distinct => variation
-    // But we only allowed up to 2 in distinctVals, so check after
-    if (distinctVals.size() > 1) {
-      var0[c] = false;
-      continue;
-    }
-
-    // Now see how many included rows we *didn't* see as nonzero
-    int missing = countIncluded - foundCount;
-    if (missing > 0) {
-      // That means those rows have value 0
-      if (distinctVals.empty()) {
-        // Everything is 0
-        // => all the same
-        var0[c] = true;
-      } else {
-        // We have exactly 1 distinct value so far
-        double stored = distinctVals[0];
-        // If that value != 0 => we have 2 distinct => variation
-        if (std::fabs(stored) > 1e-15) {
-          var0[c] = false;
-        } else {
-          // stored == 0 => all 0 => still uniform
-          var0[c] = true;
-        }
-      }
-    } else {
-      // missing=0 => all included rows were in the nonzeros
-      // => we found exactly 0 or 1 distinct value
-      //  - if 0 distinct => impossible, but let's handle gracefully
-      //  - if 1 distinct => var0[c] = true
-      if (distinctVals.empty()) {
-        // means no included row was found => but missing=0 => contradictory
-        // let's treat that as uniform => true
-        var0[c] = true;
-      } else {
-        // exactly 1 distinct => uniform
-        var0[c] = true;
-      }
-    }
-  }
-
-  // colMask[c] = !var0[c]
-  std::vector<bool> colMask(m, false);
-  for (int c = 0; c < m; ++c) {
-    colMask[c] = !var0[c];
-  }
-
-  // -------------------------------------------------------------
-  // Build the reduced matrix X_i = X[rowMask, colMask]
-  // -------------------------------------------------------------
-  int newN = 0;
-  int newM = 0;
-  std::vector<int> rowMap(n, -1), colMap(m, -1);
-
-  {
-    int idx = 0;
-    for (int r = 0; r < n; ++r) {
-      if (rowMask[r]) {
-        rowMap[r] = idx++;
-      }
-    }
-    newN = idx;
-  }
-  {
-    int idx = 0;
-    for (int c = 0; c < m; ++c) {
-      if (colMask[c]) {
-        colMap[c] = idx++;
-      }
-    }
-    newM = idx;
-  }
-
-  std::vector<Eigen::Triplet<double>> triplets;
-  triplets.reserve(X->nonZeros());
-
-  for (int c = 0; c < m; ++c) {
-    if (!colMask[c]) continue;
-    for (SparseMatrixD::InnerIterator it(*X, c); it; ++it) {
-      int r = it.row();
-      if (rowMask[r]) {
-        triplets.emplace_back(rowMap[r], colMap[c], it.value());
-      }
-    }
-  }
-
-  SparseMatrixD *X_new = new SparseMatrixD(newN, newM);
-  X_new->setFromTriplets(triplets.begin(), triplets.end());
-  Rcpp::XPtr<SparseMatrixD> X_i_ptr(X_new, true);
-
-  // -------------------------------------------------------------
-  // Build new y_i (subset of original y_i)
-  // -------------------------------------------------------------
-  Eigen::VectorXd *Y_new = new Eigen::VectorXd(newN);
-  {
-    int idx = 0;
-    for (int r = 0; r < n; ++r) {
-      if (rowMask[r]) {
-        (*Y_new)(idx++) = (*Yptr)(r);
-      }
-    }
-  }
-  Rcpp::XPtr<Eigen::VectorXd> Y_i_ptr(Y_new, true);
-
-  // -------------------------------------------------------------
-  // Build z_e = (z - z_i)[colMask]
-  // -------------------------------------------------------------
-  Eigen::VectorXd Z_diff = (*Zptr) - z_i; // length m
-  Eigen::VectorXd *Z_e_new = new Eigen::VectorXd(newM);
-
-  {
-    int idx = 0;
-    for (int c = 0; c < m; ++c) {
-      if (colMask[c]) {
-        (*Z_e_new)(idx++) = Z_diff[c];
-      }
-    }
-  }
-  Rcpp::XPtr<Eigen::VectorXd> Z_e_ptr(Z_e_new, true);
-
-  // -------------------------------------------------------------
-  // Build R logical vectors for rowMask, colMask
-  // -------------------------------------------------------------
-  Rcpp::LogicalVector mask_y(n), mask_X(m);
-  for (int r = 0; r < n; ++r) {
-    mask_y[r] = rowMask[r];
-  }
-  for (int c = 0; c < m; ++c) {
-    mask_X[c] = colMask[c];
-  }
-
-  // -------------------------------------------------------------
-  // Return as list
-  // -------------------------------------------------------------
   return Rcpp::List::create(
-    Rcpp::Named("X_i")    = X_i_ptr,
-    Rcpp::Named("y_i")    = Y_i_ptr,
-    Rcpp::Named("mask_y") = mask_y,
-    Rcpp::Named("mask_X") = mask_X,
-    Rcpp::Named("z_e")    = Z_e_ptr
+    Rcpp::Named("X_i") = 
+        Rcpp::XPtr<SparseMatrixD>(new SparseMatrixD(X_i), true),
+    Rcpp::Named("y_i") = 
+        Rcpp::XPtr<VectorXd>(new VectorXd(y_i), true),
+    Rcpp::Named("mask_y") = 
+        Rcpp::XPtr<VectorXi>(new VectorXi(inner), true),
+    // Rcpp::Named("mask_X") = 
+    //     Rcpp::XPtr<SparseMatrixD>(new SparseMatrixD(non_v0_col_subsetter), true),
+    Rcpp::Named("z_e") = 
+        Rcpp::XPtr<VectorXd>(new VectorXd(z_e), true)
   );
+}
+
+
+// [[Rcpp::export]]
+void fill_vector_by_mask(SEXP xptr_x, SEXP xptr_y, SEXP xptr_mask) {
+  Rcpp::XPtr<VectorXd> ptr_x(xptr_x);
+  Rcpp::XPtr<VectorXd> ptr_y(xptr_y);
+  Rcpp::XPtr<VectorXi> ptr_mask(xptr_mask);
+
+  if (ptr_x->size() != ptr_mask->size())
+    Rcpp::stop("Size of x and mask must match!");
+
+  int j = 0;
+  for (int i = 0; i < ptr_x->size(); i++)
+    if ((*ptr_mask)(i)) (*ptr_x)(i) = (*ptr_y)(j++);
+}
+
+
+// [[Rcpp::export]]
+int calc_n_b(SEXP xptr_y_i, SEXP xptr_y, SEXP xptr_y_rounded, int b) {
+  Rcpp::XPtr<VectorXd> ptr_y_i(xptr_y_i);
+  Rcpp::XPtr<VectorXd> ptr_y(xptr_y);
+  Rcpp::XPtr<VectorXd> ptr_y_rounded(xptr_y_rounded);
+
+  double s_y = ptr_y_i->sum();
+  double s_e = (*ptr_y - *ptr_y_rounded).sum();
+  int n_b = (int)std::round((s_y + s_e) / b);
+
+  return n_b; 
 }
 
 
@@ -548,31 +370,31 @@ SEXP round_cells_cpp(SEXP Xptr,
   const int m = X.cols();
 
   // 2) Get y
-  Rcpp::XPtr<Eigen::VectorXd> Yp(y_ptr);
+  Rcpp::XPtr<VectorXd> Yp(y_ptr);
   if (Yp->size() != n) {
     Rcpp::stop("Length of y must match # of rows in X.");
   }
 
   // 3) Get z_e
-  Rcpp::XPtr<Eigen::VectorXd> Zep(z_e_ptr);
+  Rcpp::XPtr<VectorXd> Zep(z_e_ptr);
   if (Zep->size() != m) {
     Rcpp::stop("Length of z_e must match # of cols in X.");
   }
 
   // 4) Compute z = X^T y + z_e
-  Eigen::VectorXd z = X.transpose() * (*Yp); // length m
+  VectorXd z = X.transpose() * (*Yp); // length m
   z += (*Zep); // now z is X^T y + z_e
 
   // 5) Create y_i (length n) = all 0
-  Eigen::VectorXd *Y_i = new Eigen::VectorXd(n);
+  VectorXd *Y_i = new VectorXd(n);
   Y_i->setZero();  // fill with 0
 
   // 6) Compute M = b * (X * X^T) as a dense matrix (n x n)
-  Eigen::MatrixXd M_mat = (X * X.transpose()).toDense();
+  MatrixXd M_mat = (X * X.transpose()).toDense();
   M_mat *= b;
 
   // 7) c_i = X * z  (length n)
-  Eigen::VectorXd c_i = X * z;
+  VectorXd c_i = X * z;
 
   // 8) RNG
   std::mt19937 rng(seed);
@@ -624,7 +446,7 @@ SEXP round_cells_cpp(SEXP Xptr,
   // -------------------------------------------------------------------------
   double last_k_max = -std::numeric_limits<double>::infinity();
   // double last_k_min =  std::numeric_limits<double>::infinity();  // R code had it but never used it
-  Eigen::VectorXd last_y_i = *Y_i;  // copy current y_i
+  VectorXd last_y_i = *Y_i;  // copy current y_i
 
   while (i < max_iter) {
     i++;
@@ -709,5 +531,5 @@ SEXP round_cells_cpp(SEXP Xptr,
   }
 
   // Return the final y_i as an external pointer
-  return Rcpp::XPtr<Eigen::VectorXd>(Y_i, true);
+  return Rcpp::XPtr<VectorXd>(Y_i, true);
 }

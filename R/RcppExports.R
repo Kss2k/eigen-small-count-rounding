@@ -17,8 +17,20 @@ print_sparse_matrix <- function(mat_xptr) {
     invisible(.Call('_EigenSmallCountRounding_print_sparse_matrix', PACKAGE = 'EigenSmallCountRounding', mat_xptr))
 }
 
-calc_z <- function(mat_xptr, y_i) {
-    .Call('_EigenSmallCountRounding_calc_z', PACKAGE = 'EigenSmallCountRounding', mat_xptr, y_i)
+print_VectorXd <- function(xptr) {
+    invisible(.Call('_EigenSmallCountRounding_print_VectorXd', PACKAGE = 'EigenSmallCountRounding', xptr))
+}
+
+print_VectorXi <- function(xptr) {
+    invisible(.Call('_EigenSmallCountRounding_print_VectorXi', PACKAGE = 'EigenSmallCountRounding', xptr))
+}
+
+calc_z <- function(xptr_M, xptr_y) {
+    .Call('_EigenSmallCountRounding_calc_z', PACKAGE = 'EigenSmallCountRounding', xptr_M, xptr_y)
+}
+
+copy_xptr_VectorXd <- function(xptr) {
+    .Call('_EigenSmallCountRounding_copy_xptr_VectorXd', PACKAGE = 'EigenSmallCountRounding', xptr)
 }
 
 calc_M <- function(xptr_X, b) {
@@ -39,6 +51,14 @@ as_xptr_vector <- function(vec) {
 
 reduce_X_y_cpp <- function(Xptr, y_i_ptr, b, z_ptr) {
     .Call('_EigenSmallCountRounding_reduce_X_y_cpp', PACKAGE = 'EigenSmallCountRounding', Xptr, y_i_ptr, b, z_ptr)
+}
+
+fill_vector_by_mask <- function(xptr_x, xptr_y, xptr_mask) {
+    invisible(.Call('_EigenSmallCountRounding_fill_vector_by_mask', PACKAGE = 'EigenSmallCountRounding', xptr_x, xptr_y, xptr_mask))
+}
+
+calc_n_b <- function(xptr_y_i, xptr_y, xptr_y_rounded, b) {
+    .Call('_EigenSmallCountRounding_calc_n_b', PACKAGE = 'EigenSmallCountRounding', xptr_y_i, xptr_y, xptr_y_rounded, b)
 }
 
 round_cells_cpp <- function(Xptr, y_ptr, b, n_b, max_iter, z_e_ptr, seed) {

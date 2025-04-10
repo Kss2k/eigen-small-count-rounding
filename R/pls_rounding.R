@@ -1,3 +1,7 @@
+TOTAL_C = -9
+TOTAL_L = "__total__"
+syms <- rlang::syms
+
 create_dummy_old <- function(data, groupings) {
   n <- nrow(data)
   m <- nrow(groupings)
@@ -11,7 +15,7 @@ create_dummy_old <- function(data, groupings) {
   for (i in seq_len(nrow(groupings))) {
     row <- matrix(groupings[i, ], nrow=n, ncol=k, byrow=TRUE)
 
-    cond <- apply(data == row | row == "__total__", MARGIN=1, FUN=all)
+    cond <- apply(data == row | row == TOTAL, MARGIN=1, FUN=all)
  
     X[cond, i] <- 1
   }
@@ -35,7 +39,7 @@ create_dummy <- function(data, groupings) {
 
 
 get_unique_and_total <- function(x) {
-  c(as.character(unique(x)), "__total__")
+  c(as.character(unique(x)), TOTAL_L)
 }
 
 
@@ -63,26 +67,37 @@ get_groupings <- function(data, dim_var, total=TRUE, exclude_no_total=FALSE) {
   groupings <- dplyr::group_by_at(data, dim_var) |>
     dplyr::summarize(.groups="drop")
 
+  
   if (!total)
-    return(as.matrix(groupings))
+    return(as.matrix(groupings |> dplyr::arrange(!!!syms(dim_var))))
 
   for (v in dim_var) {
     groupings_total_v <- unique(groupings[dim_var != v])
-    groupings_total_v[[v]] <- "__total__"
+    groupings_total_v[[v]] <- -9
 
     groupings <- rbind(groupings, groupings_total_v)
   }
 
   if (exclude_no_total)
-    groupings <- groupings[apply(groupings == "__total__", MARGIN=1, FUN=any), ]
+    groupings <- groupings[apply(groupings == TOTAL_C, MARGIN=1, FUN=any), ]
 
-  as.matrix(groupings)
+  as.matrix(groupings |> dplyr::arrange(!!!syms(dim_var)))
 }
 
 
 printf <- function(...) {
   cat(sprintf(...), "\n")
   flush.console()
+}
+
+
+get_levels <- function(factor) {
+  c(levels(factor), TOTAL_L)
+}
+
+
+get_codes <- function(factor) {
+  c(seq_along(levels(factor)), TOTAL_C)
 }
 
 
@@ -96,25 +111,29 @@ pls_rounding <- function(data, dim_var, freq_var, round_base=3, total=TRUE,
   if (any(freq_var < 0))
     stop("Frequency variable must be non-negative.")
 
-  data <- data[data[[freq_var]] > 0, ] # zero-cells are not relevant for the algorithm
+  data <- data[data[[freq_var]] > 0, ] |> # zero-cells are not relevant for the algorithm
+    dplyr::arrange(!!!syms(dim_var))
+  factors <- list()
 
-  for (v in dim_var)
-    data[[v]] <- as.character(data[[v]])
+  for (v in dim_var) {
+    factor <- as.factor(data[[v]])
+    factors[[v]] <- list(levels=get_levels(factor), codes=get_codes(factor))
+    data[[v]] <- as.integer(factor)
+  }
 
-  groupings <- get_groupings(data, dim_var, total=total, exclude_no_total=exclude_no_total)
+  groupings_publish <- get_groupings(data, dim_var, total=total, exclude_no_total=exclude_no_total)
+  groupings_inner <- as.matrix(data[dim_var])
+
 
   b <- round_base
-  X <- create_dummy(data, groupings)
-  y <- data[[freq_var]]
+  printf("Creating dummy matrix")
+  X <- create_dummy_cpp(groupings_inner=groupings_inner, 
+                        groupings_publish=groupings_publish)
+  y <- as_xptr_vector(data[[freq_var]])
   z <- calc_z(X, y)
-  c1 <- calc_c(X, z)
 
-  y0 <- rep(0, length(y))
-
-  y_rounded <- y
-
-  X_i <- X
-  y_i <- y
+  y_rounded <- copy_xptr_VectorXd(y)
+  y_i <- copy_xptr_VectorXd(y)
 
   printf("Rounding %s cells", length(y))
   i <- 0
@@ -122,16 +141,13 @@ pls_rounding <- function(data, dim_var, freq_var, round_base=3, total=TRUE,
     printf(" > iteration %s", (i <- i + 1))
     printf(" > reducing X")
 
-    reduced <- reduce_X_y_cpp(X=X, y_i=as_xptr_vector(y_rounded), b=b, 
-                              z=as_xptr_vector(z))
+    reduced <- reduce_X_y_cpp(X=X, y_i=y_rounded, b=b, z=z)
 
-    print(" > reduced X")
+    printf(" > reduced X")
     if (is.null(reduced$X_i))
       break
 
-    s_y <- sum(as_numeric_vector(reduced$y_i))
-    s_e <- sum(y - y_rounded)
-    n_b <- round((s_y + s_e) / b)
+    n_b <- calc_n_b(xptr_y_i=reduced$y_i, xptr_y=y, xptr_y_rounded=y_rounded, b=b)
 
     if (n_b == 0)
       break
@@ -140,14 +156,18 @@ pls_rounding <- function(data, dim_var, freq_var, round_base=3, total=TRUE,
     y_i <- round_cells_cpp(X=reduced$X_i, y=reduced$y_i, b=b, z_e=reduced$z_e, n_b=n_b, 
                            max_iter=max_iter, seed=seed)
    
-    y_rounded[reduced$mask_y] <- as_numeric_vector(y_i)
+    # y_rounded[reduced$mask_y] <- as_numeric_vector(y_i)
+    # print_VectorXd( y_i)
+    # print_VectorXd( y_rounded)
+    fill_vector_by_mask(xptr_x=y_rounded, xptr_y=y_i, xptr_mask=reduced$mask_y)
+    # print_VectorXd( y_rounded)
   }
 
 
-  original <- calc_z(X, y)
-  rounded <- calc_z(X, y_rounded)
+  original <- as_numeric_vector(calc_z(X, y))
+  rounded <- as_numeric_vector(calc_z(X, y_rounded))
 
-  as.data.frame(groupings) |>
+  as.data.frame(groupings_publish) |>
     dplyr::mutate(
       original = original,
       rounded = rounded,

@@ -16,6 +16,9 @@ test_dat <- data.frame(
   names_to = "col",
   values_to = "n"
 )
+a <- pls_rounding(test_dat, dim_var=c("col", "row"),
+             freq_var="n", total=TRUE, exclude_no_total=TRUE,  
+             round_base = 5)
 
 
 # generate a test datasets
